@@ -77,7 +77,7 @@ class Fetch_Robot():
         print("=========== End effector: %s" % self.eef_link)
 
         self.group_names = self.robot.get_group_names()
-        print("=========== Robot Groups:" + self.group_names)
+        print("=========== Robot Groups:", self.group_names)
 
         self.collision_object_pub = rospy.Publisher('/collision_object', moveit_msgs.msg.CollisionObject, queue_size=10)
 
