@@ -26,9 +26,9 @@ def add_table(robot, tf_helper):
     # get table pose
     table_transform = tf_helper.getTransform('/base_link', '/Table')
     # add it to planning scene
-    robot.addCollisionTable("table", table_transform[0][0], table_transform[0][1], table_transform[0][2], \
+    robot.addCollisionTable("table", table_transform[0][0], table_transform[0][1], table_transform[0][2]+.001, \
         table_transform[1][0], table_transform[1][1], table_transform[1][2], table_transform[1][3], \
-        0.8, 0.8, 0.8)
+        0.7, 1.5, 0.09) #.7 1.5, .06 
 
 def add_object(robot, tf_helper,object_name,object_path=None):
     """
@@ -38,25 +38,28 @@ def add_object(robot, tf_helper,object_name,object_path=None):
     object_path = os.path.join(os.path.split(this_dir)[0], "objects", object_name + ".stl") 
     # add the object into the planning scene 
     current_object_transform = tf_helper.getTransform('/base_link', '/' + object_name)# get object pose
-    robot.addCollisionObject(object_name + "_collision", current_object_transform, object_path)# add it to planning scene
+    robot.addCollisionObject(object_name + "_collision", current_object_transform, object_path, size_scale = .15)# add it to planning scene
 
-# def grasp_estimation(tf_helper, robot, object_name, object_path, isSim):
-#     """
-#     This function will return the gripper pose in the object frame
-#     return: issuccess, poseMat_of_object
-#     """
 
-#     try:
-#         init_hand_in_obj_transform = tf_helper.getTransform('/' + object_name, '/gripper_link')
 
-#         # add the object into the planning scene
-#         current_object_transform = tf_helper.getTransform('/base_link', '/' + object_name)
-#         robot.addCollisionObject(object_name + "_collision", current_object_transform, object_path)
-#     except Exception as e:# if failure, then return False
-#         print(e)
-#         return False, None
+# pickup is the action to move the gripper up in the base_link frame
+def pickup(tf_helper, height):
+  """Pick up object"""
+  
+  target_transform = tf_helper.getTransform('/base_link', '/gripper_link')
+  target_transform[0][2] += height
 
-#     return True, init_hand_in_obj_transform
+  robot.switchController('my_cartesian_motion_controller', 'arm_controller')
+
+  while not rospy.is_shutdown():
+    if robot.moveToFrame(target_transform, True):
+      break
+    rospy.sleep(0.05)
+
+  robot.switchController('arm_controller', 'my_cartesian_motion_controller')
+
+  return True, target_transform
+
 
 # grasp_object will try to grasp the object
 # input: object pose
@@ -145,13 +148,13 @@ def grasp_object( planner, object_pose, given_grasps=None, object_name = None):
   # move to pre grasp pose
   plan = robot.planto_pose(obj_pre_grasp_trans)
   robot.display_trajectory(plan)
-  # raw_input("ready to pre-grasp")
+  raw_input("ready to pre-grasp")
   robot.execute_plan(plan)
 
   robot.switchController('my_cartesian_motion_controller', 'arm_controller')
 
   # move to grasp pose
-  # raw_input("ready to grasp")
+  raw_input("ready to grasp")
   while not rospy.is_shutdown():
     if robot.moveToFrame(obj_grasp_trans, True):
       break
@@ -160,7 +163,7 @@ def grasp_object( planner, object_pose, given_grasps=None, object_name = None):
   robot.switchController('arm_controller', 'my_cartesian_motion_controller')
 
   # close the gripper with proper width
-  # print "grasp width = ", gripper_width
+  print("grasping with width: ", gripper_width)
   # raw_input("ready to close grasp")
   robot.closeGripper()
 
@@ -208,13 +211,13 @@ if __name__=='__main__':
   planner = RegripPlanner(objpath, handpkg, gdb)
 
   # add objects into planning scene
-  #add_table(robot, tf_helper)
-  add_object(robot, tf_helper,"Table")
+  add_table(robot, tf_helper)
+  #add_object(robot, tf_helper,"Table")
   print("Added objects")
 
   #This gets the transfrom from the object to baselink 
   object_pose_in_base_link = tf_helper.getTransform('/base_link', '/' + object_name) # add the object into the planning scene
-  robot.addCollisionObject(object_name + "_collision", object_pose_in_base_link, objpath)
+  robot.addCollisionObject(object_name + "_collision", object_pose_in_base_link, objpath,size_scale = 1)
 
  # extract the list of init grasps
   result, init_grasps = getInitGrasps(gdb, object_name=object_name)
@@ -229,9 +232,21 @@ if __name__=='__main__':
 
   result, init_grasp_transform_in_object_frame, init_jawwidth = grasp_object(planner, object_pose_in_base_link, given_grasps = init_grasps, object_name=object_name)
   #result, init_grasp_transform_in_object_frame, init_jawwidth = grasp_object(planner, object_pose_in_base_link, object_name=object_name)
-  print("grasp object")
+  print("grasping object")
   if result:
     print("---SUCCESS---")
   else:
     print("---FAILURE---")
     exit()
+
+  #raw_input("Ready to pick up object?")
+  
+  result = pickup(tf_helper, 0.15)
+  print "pick up object"
+  if result:
+    print "---SUCCESS---"
+  else:
+    print "---FAILURE---"
+    exit()
+
+    

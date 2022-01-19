@@ -97,6 +97,7 @@ class Fetch_Robot():
         self.tf_listener = tf.TransformListener()
 
         self.ik_solver = IK('torso_lift_link', 'gripper_link')
+        #self.ik_solver = IK('base_link', 'gripper_link')
 
         # wait for validity check service
         rospy.wait_for_service("check_state_validity")
@@ -259,6 +260,8 @@ class Fetch_Robot():
         self.setTargetFrame(targetposition, targetorientation)
 
         transerror, rotationerror = self.getError()
+        print("trans:", transerror)
+        print(rotationerror)
         # if the error is lower than threshold, then it will not set the target frame
         if(transerror < self.transThreshold and rotationerror < self.rotThreshold):
             return True
