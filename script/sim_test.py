@@ -5,7 +5,7 @@ import numpy as np
 from fetch_robot import Fetch_Robot
 from regrasp_planner import RegripPlanner
 from tf_util import TF_Helper, PandaPosMax_t_PosMat, transformProduct, getMatrixFromQuaternionAndTrans, getTransformFromPoseMat
-#from rail_segmentation.srv import SearchTable
+from rail_segmentation.srv import SearchTable
 from scipy.spatial.transform import Rotation as R
 from scipy.special import softmax
 
@@ -17,7 +17,11 @@ from utils import dbcvt as dc
 from database import dbaccess as db
 
 
+from semantic_grocery_placement.srv import StopOctoMap
 
+
+SHELF1 = .31
+SHELF2 = 0
 
 def add_table(robot, tf_helper):
     """
@@ -193,6 +197,24 @@ def getInitGrasps(gdb, object_name):
 
     return True, init_grasps
 
+def set_ArmPos(robot, defult_joints=None):
+  robot.getjointNamesNValues()
+  defult_joints = [1.4157397747039795, 0.6173441410064697, 0.07052537798881531, -2.2417545318603516, 
+                  2.046666383743286, -1.8662853240966797, -2.707148790359497]
+  plan = robot.planto_joints(defult_joints)
+  robot.display_trajectory(plan)
+  #raw_input("ready to execute")
+  #robot.execute_plan(plan)
+
+def liftRobotTorso(robot,isSim,value):
+  robot.getjointNamesNValues()
+  if isSim:
+    robot.lift_robot_torso([value])
+  else:
+    print("No controler yet for torso not in Sim")
+
+def tiltHeadJoint(robot):
+  pass
 
 if __name__=='__main__':
   
@@ -209,6 +231,7 @@ if __name__=='__main__':
   handpkg = fetch_grippernm  #SQL grasping database interface 
   gdb = db.GraspDB()   #SQL grasping database interface
   planner = RegripPlanner(objpath, handpkg, gdb)
+  
 
   # add objects into planning scene
   add_table(robot, tf_helper)
@@ -218,8 +241,21 @@ if __name__=='__main__':
   #This gets the transfrom from the object to baselink 
   object_pose_in_base_link = tf_helper.getTransform('/base_link', '/' + object_name) # add the object into the planning scene
   robot.addCollisionObject(object_name + "_collision", object_pose_in_base_link, objpath,size_scale = 1)
+  
+  
+  #set_ArmPos(robot)
+  liftRobotTorso(robot,isSim,SHELF2)
+  # rospy.wait_for_service('stop_octo_map')
+  # print("done")
+  # try:
+  #     octoclient = rospy.ServiceProxy('stop_octo_map', StopOctoMap)
+  #     octoclient()
+  # except rospy.ServiceException as e:
+  #     print ("Fail to stop octo map controller: %s"%e)  
+  raw_input("exit?") 
+  exit()
 
- # extract the list of init grasps
+  # extract the list of init grasps
   result, init_grasps = getInitGrasps(gdb, object_name=object_name)
   print("get init grasps")
   if result:
@@ -249,4 +285,8 @@ if __name__=='__main__':
     print "---FAILURE---"
     exit()
 
-    
+  # move to inital arm pos
+  set_ArmPos(robot)
+  raw_input("finished moving to defult art pose?")
+
+

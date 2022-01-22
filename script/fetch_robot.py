@@ -103,6 +103,24 @@ class Fetch_Robot():
         rospy.wait_for_service("check_state_validity")
         self.state_valid_service = rospy.ServiceProxy('check_state_validity', GetStateValidity)
 
+    
+    def lift_robot_torso(self, joint_value=[0.3]):
+        joint_names = ['torso_lift_joint']
+        client = actionlib.SimpleActionClient("/torso_controller/follow_joint_trajectory", FollowJointTrajectoryAction)
+
+        rospy.loginfo('Waiting for joint trajectory action')    
+        client.wait_for_server()
+        rospy.loginfo('Found joint trajectory action!')
+        
+        goal = FollowJointTrajectoryGoal()
+        goal.trajectory.joint_names = joint_names
+        point = JointTrajectoryPoint()
+        # point.velocities.append(0.1)
+        point.positions = joint_value
+        point.time_from_start = rospy.Duration(1)
+        goal.trajectory.points.append(point)
+        client.send_goal_and_wait(goal)
+
     def generate_seed_state(self, numOfJoints):
         result = []
         for _ in range(numOfJoints):
@@ -168,6 +186,20 @@ class Fetch_Robot():
             return js.position[index]
         else:
             return None
+
+    def getjointNamesNValues(self):
+        print("Joint Names: " , self.group.get_active_joints())
+        print("Joint Values: ", self.group.get_current_joint_values())
+
+    def planto_joints(self, joints, names=None):
+        
+        if names == None:
+            self.group.set_joint_value_target(joints)
+        else:
+            self.group.set_joint_value_target(dict(zip(names, joints)))
+        plan = self.group.plan()
+        self.group.clear_pose_targets()
+        return plan
 
     # set the distance between fingers in meter unit
     def setGripperWidth(self, pos):
