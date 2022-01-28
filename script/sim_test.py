@@ -9,6 +9,9 @@ from rail_segmentation.srv import SearchTable
 from scipy.spatial.transform import Rotation as R
 from scipy.special import softmax
 
+from std_srvs.srv import Empty
+from rail_manipulation_msgs.srv import SegmentObjects 
+
 import pandaplotutils.pandageom as pandageom
 import pandaplotutils.pandactrl as pandactrl
 from manipulation.grip.fetch_gripper import fetch_grippernm
@@ -19,9 +22,13 @@ from database import dbaccess as db
 
 from semantic_grocery_placement.srv import StopOctoMap
 
+from object_cluster_planner import Grocery_cluster
 
 SHELF1 = .31
 SHELF2 = 0
+
+
+
 
 def add_table(robot, tf_helper):
     """
@@ -203,8 +210,8 @@ def set_ArmPos(robot, defult_joints=None):
                   2.046666383743286, -1.8662853240966797, -2.707148790359497]
   plan = robot.planto_joints(defult_joints)
   robot.display_trajectory(plan)
-  #raw_input("ready to execute")
-  #robot.execute_plan(plan)
+  raw_input("ready to execute")
+  robot.execute_plan(plan)
 
 def liftRobotTorso(robot,isSim,value):
   robot.getjointNamesNValues()
@@ -216,6 +223,76 @@ def liftRobotTorso(robot,isSim,value):
 def tiltHeadJoint(robot):
   pass
 
+def StopNStart_octomap():
+   #Stop octomap
+  rospy.wait_for_service('stop_octo_map')
+  try:
+      octoclient = rospy.ServiceProxy('stop_octo_map', StopOctoMap)
+      octoclient()
+  except rospy.ServiceException as e:
+      print ("Fail to stop octo map controller: %s"%e)  
+
+
+def findMatching_PantryItem(robot,isSim):
+  #liftRobotTorso(robot,isSim,SHELF2)
+  rospy.sleep(1) # might not wait long enough to lift torso.
+  
+  # Stop octo map
+  StopNStart_octomap()
+
+
+  # call the table searcher server for search for table and objects.
+  rospy.wait_for_service('table_searcher/segment_objects')
+  tableSearcher = rospy.ServiceProxy('table_searcher/segment_objects', SegmentObjects)
+   
+  try:
+    tableresult = tableSearcher()
+  except rospy.ServiceException as exc:
+    print("Service did not process request: " + str(exc))
+    return False, None 
+  print("Done with table and objects segment.") 
+  
+  #start octo_map
+  StopNStart_octomap()
+
+  for obj in tableresult.segmented_objects.objects:
+    tf_helper.pubTransform("place_pos_rail", ((obj.centroid.x, obj.centroid.y, obj.centroid.z), \
+                  (obj.orientation.x, obj.orientation.y, obj.orientation.z, obj.orientation.w)))
+    pass
+
+def findGrocery_Placement(robot,isSim,target_object_pose):
+
+  #liftRobotTorso(robot,isSim,SHELF2)
+  rospy.sleep(1) # might not wait long enough to lift torso.
+  
+  # Stop octo map
+  StopNStart_octomap()
+
+
+  # call the table searcher server for search for table and objects.
+  rospy.wait_for_service('table_searcher/segment_objects')
+  tableSearcher = rospy.ServiceProxy('table_searcher/segment_objects', SegmentObjects)
+   
+  try:
+    tableresult = tableSearcher()
+  except rospy.ServiceException as exc:
+    print("Service did not process request: " + str(exc))
+    return False, None 
+  print("Done with table and objects segment.") 
+  
+  #start octo_map
+  StopNStart_octomap()
+
+  #picking a random object for now untill we implement findMatching_pantry
+  target_object_pose = tableresult.segmented_objects.objects[0]
+
+  left_of_target_object_pose = target_object_pose.centroid.y + .2
+  right_of_target_object_pose = target_object_pose.centroid.y - .2
+
+   # show the position tf in rviz
+  tf_helper.pubTransform("place_pos_rail", ((target_object_pose.centroid.x, left_of_target_object_pose, target_object_pose.centroid.z), \
+                  (target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w)))
+
 if __name__=='__main__':
   
   object_name = "sugar_box_simp"
@@ -225,36 +302,31 @@ if __name__=='__main__':
   robot = Fetch_Robot(sim=isSim)
   tf_helper = TF_Helper()
 
+  #Add object model to allow it to find grasping points. 
   base = pandactrl.World(camp=[700,300,1400], lookatp=[0,0,0])
   this_dir, this_filename = os.path.split(os.path.realpath(__file__))   
   objpath = os.path.join(os.path.split(this_dir)[0], "objects", object_name + ".stl") 
   handpkg = fetch_grippernm  #SQL grasping database interface 
   gdb = db.GraspDB()   #SQL grasping database interface
   planner = RegripPlanner(objpath, handpkg, gdb)
-  
 
-  # add objects into planning scene
+
+ # add objects into planning scene
   add_table(robot, tf_helper)
-  #add_object(robot, tf_helper,"Table")
   print("Added objects")
 
   #This gets the transfrom from the object to baselink 
   object_pose_in_base_link = tf_helper.getTransform('/base_link', '/' + object_name) # add the object into the planning scene
   robot.addCollisionObject(object_name + "_collision", object_pose_in_base_link, objpath,size_scale = 1)
-  
-  
+
   #set_ArmPos(robot)
-  liftRobotTorso(robot,isSim,SHELF2)
-  # rospy.wait_for_service('stop_octo_map')
-  # print("done")
-  # try:
-  #     octoclient = rospy.ServiceProxy('stop_octo_map', StopOctoMap)
-  #     octoclient()
-  # except rospy.ServiceException as e:
-  #     print ("Fail to stop octo map controller: %s"%e)  
-  raw_input("exit?") 
+
+  findGrocery_Placement(robot,isSim, object_pose_in_base_link)
+
+  print("Exit")
   exit()
 
+  """ The code below allows the robot to grasp the object and move to a defult config"""
   # extract the list of init grasps
   result, init_grasps = getInitGrasps(gdb, object_name=object_name)
   print("get init grasps")

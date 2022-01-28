@@ -64,3 +64,11 @@ print(cluster_list)
 
 #10,17,31, 14,32,41, 13, 36,25
 # 16 , 26, 42, 38
+
+class Grocery_cluster:
+    def __init__(self,shelf1,shelf2, pantrys, grocerys):
+        self.shelf1 = shelf1
+        self.shelf2 = shelf2
+        self.pantrys = pantrys
+        self.grocerys = grocerys
+

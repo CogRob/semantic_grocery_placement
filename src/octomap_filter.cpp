@@ -4,6 +4,8 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
+#include <pcl/filters/passthrough.h>
+
 #include <semantic_grocery_placement/StopOctoMap.h>
 
 ros::Publisher pub;
@@ -31,8 +33,29 @@ cloud_cb (const sensor_msgs::PointCloud2ConstPtr& input)
     output = sensor_msgs::PointCloud2(*input);
   }
 
+ //Filter output for shelf
+   // convert Sensor msgs to pcl
+  // pcl::PointCloud<pcl::PointXYZ>::Ptr pcl_filter_output(new pcl::PointCloud<pcl::PointXYZ>); 
+  // pcl::fromROSMsg(output, *pcl_filter_output);
+
+    
+  //   // filter with pcl 
+  // pcl::PassThrough<pcl::PointXYZ> pass;
+  // pass.setInputCloud (pcl_filter_output);
+  // pass.setFilterFieldName ("y"); //y
+  //   // "y"  first value increases view upper y direction. second inccrease view in the lower y direction. 
+  // pass.setFilterLimits (0.001, 0.9);
+  // pass.filter (*pcl_filter_output);
+  //   // convert pcl back to sensor msgs pointc2. 
+  // sensor_msgs::PointCloud2 filter_output;  
+  // pcl::toROSMsg(*pcl_filter_output, filter_output);
+
+
+  
+
   // Publish the data.
   pub.publish (output);
+  //pub.publish (filter_output);
 }
 
 int
