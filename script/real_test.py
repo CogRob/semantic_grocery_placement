@@ -4,11 +4,11 @@ import rospy
 import numpy as np
 from fetch_robot import Fetch_Robot
 from regrasp_planner import RegripPlanner
-from tf_util import TF_Helper, PandaPosMax_t_PosMat, transformProduct, getMatrixFromQuaternionAndTrans, getTransformFromPoseMat, align_vectors
+from tf_util import TF_Helper, PandaPosMax_t_PosMat, transformProduct, getMatrixFromQuaternionAndTrans, getTransformFromPoseMat
 from rail_segmentation.srv import SearchTable
 from scipy.spatial.transform import Rotation as R
 from scipy.special import softmax
-
+from object_segmentation.srv import Object_seg_result
 from std_srvs.srv import Empty
 from rail_manipulation_msgs.srv import SegmentObjects 
 
@@ -30,7 +30,7 @@ SHELF2 = 0
 
 
 
-def add_table(robot, tf_helper):
+def add_shelfs(robot, tf_helper):
     """
     add the table into the planning scene
     """
@@ -113,7 +113,7 @@ def grasp_object( planner, object_pose, given_grasps=None, object_name = None):
 
         gripper_pos_list.append((grasp_temp[0][0], grasp_temp[0][1]))
 
-    print "Going through this many grasp pose: " ,len(gripper_pos_list)
+    print("Going through this many grasp pose: " ,len(gripper_pos_list))
     for i, (obj_grasp_pos, jaw_width) in enumerate(gripper_pos_list):
 
         
@@ -137,7 +137,7 @@ def grasp_object( planner, object_pose, given_grasps=None, object_name = None):
         pre_grasp_ik_result = robot.solve_ik_sollision_free_in_base(obj_pre_grasp_trans, 30) #30
         
         if pre_grasp_ik_result == None:
-            print 'check on grasp ', i
+            print('check on grasp ', i)
             continue
         
         return obj_pre_grasp_trans, pre_grasp_ik_result, obj_grasp_trans, jaw_width, obj_grasp_trans_obframe
@@ -189,7 +189,7 @@ def getInitGrasps(gdb, object_name):
     sql = "SELECT * FROM object WHERE object.name LIKE '%s'" % object_name
     result = gdb.execute(sql)
     if not result:
-        print "please add the object name to the table first!!"
+        print("please add the object name to the table first!!")
         return False, None
     else:
         objectId = int(result[0][0])
@@ -212,7 +212,6 @@ def set_ArmPos(robot, defult_joints=None):
   robot.display_trajectory(plan)
   raw_input("ready to execute")
   robot.execute_plan(plan)
-  raw_input("done moving to pos?")
 
 def liftRobotTorso(robot,isSim,value):
   robot.getjointNamesNValues()
@@ -234,14 +233,40 @@ def StopNStart_octomap():
       print ("Fail to stop octo map controller: %s"%e)  
 
 
-def findMatching_PantryItem(robot,isSim):
+def matchCentroidNBoundingBox(tableresult,classifier, target_name):
+  #Intrensic cam matrix 
+  #cam_K: [527.3758609346917, 0.0, 326.6388366771264, 0.0, 523.6181455086474, 226.4866800158784, 0.0, 0.0, 1.0]
+  cam_K = np.array([ [527.3758609346917, 0.0, 326.6388366771264], [ 0.0, 523.6181455086474, 226.4866800158784],
+         [ 0.0, 0.0, 1.0] ])
+  box = None
+  for i in range(0, len(classifier.Labels)):
+    if classifier.Labels[i] == target_name:
+      box = classifier.boxes[i].box
+
+  if not box:
+    return False, -1
+
+  target_transfom = tf_helper.getPoseMat( '/head_camera_depth_optical_frame', '/base_link')
+  for obj in tableresult.segmented_objects.objects:
+    obj_trans = np.array( [obj.centroid.x, obj.centroid.y, obj.centroid.z, 1])
+    obj_trans = target_transfom.dot(obj_trans)
+    obj_trans = obj_trans[:3]
+    point = cam_K.dot(obj_trans)
+    twoD_point = point[0]/point[2], point[1]/point[2]
+    if twoD_point[1] > box[1] and twoD_point[1] < box[3]:
+      if twoD_point[0] > box[0] and twoD_point[0] < box[2]:
+        return True, obj 
+
+def findMatching_PantryItem(robot,isSim, target_object_name):
   #liftRobotTorso(robot,isSim,SHELF2)
-  #rospy.sleep(1) # might not wait long enough to lift torso.
-  
+  rospy.sleep(1) # might not wait long enough to lift torso.
+
   # Stop octo map
   StopNStart_octomap()
 
-
+  """ 
+   Object centroid detection
+   """
   # call the table searcher server for search for table and objects.
   rospy.wait_for_service('table_searcher/segment_objects')
   tableSearcher = rospy.ServiceProxy('table_searcher/segment_objects', SegmentObjects)
@@ -255,84 +280,47 @@ def findMatching_PantryItem(robot,isSim):
   
   #start octo_map
   StopNStart_octomap()
-
-  #picking a random object for now untill we implement findMatching_pantry
-  target_object_pose = tableresult.segmented_objects.objects[0]
-
-  for obj in tableresult.segmented_objects.objects:
-    tf_helper.pubTransform("obj_pos_rail", ((obj.centroid.x, obj.centroid.y, obj.centroid.z), \
-                  (obj.orientation.x, obj.orientation.y, obj.orientation.z, obj.orientation.w)))
   
-  return True, target_object_pose
+  """ 
+  Target object classification
+  """
+  #Object Filter 
+  rospy.wait_for_service("object_filter")
+  obj_classifier = rospy.ServiceProxy('object_filter',Object_seg_result)
+  while True:
+    try:
+      classifier_result = obj_classifier()  
+    except rospy.ServiceException as e:
+      print ("Failed to find object: %s"%e)  
+    break
+
+  return matchCentroidNBoundingBox(tableresult ,classifier_result,target_object_name)
+
 
 def findGrocery_Placement(robot,isSim,target_object_pose):
 
   #liftRobotTorso(robot,isSim,SHELF2)
-
-  if isSim:
-    target_object_pose[0][1] = target_object_pose[0][1] - .2
-    # left_of_target_object_pose = target_object_pose[0][1] + .13
-    # right_of_target_object_pose = target_object_pose[0][1] - .13
-    # tf_helper.pubTransform("place_pos_rail", ((target_object_pose[0][0], target_object_pose[0][1] , target_object_pose[0][2]), \
-    #               (target_object_pose[1][0], target_object_pose[1][1], target_object_pose[1][2], target_object_pose[1][3])))
-
-    placement_pose = getMatrixFromQuaternionAndTrans( [target_object_pose[1][0], target_object_pose[1][1], target_object_pose[1][2], target_object_pose[1][3]] , \
-                        [target_object_pose[0][0], target_object_pose[0][1], target_object_pose[0][2]])
-  # else:
-    #  # show the position tf in rviz
-    # tf_helper.pubTransform("place_pos_rail", ((target_object_pose.centroid.x, left_of_target_object_pose, target_object_pose.centroid.z), \
-    #                 (target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w)))
-
-    # placement_pose = getMatrixFromQuaternionAndTrans([target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w], \
-    #                        [target_object_pose.centroid.x, left_of_target_object_pose, target_object_pose.centroid.z])
-  
-  return True, placement_pose
+  rospy.sleep(1) # might not wait long enough to lift torso.
 
 
+  left_of_target_object_pose = target_object_pose.centroid.y + .13
+  right_of_target_object_pose = target_object_pose.centroid.y - .13
+  tf_helper.pubTransform("obj_pos_rail", ((target_object_pose.centroid.x, target_object_pose.centroid.y, target_object_pose.centroid.z), \
+                  (target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w)))
 
-def move_to_Placement(robot, target_placement_pos, tf_helper):
-  current_gripper_pos = tf_helper.getPoseMat('/base_link', '/gripper_link')
-  current_gripper_trans = tf_helper.getTransform('/base_link', '/gripper_link')
-  #change gripper rotation 
-  R_t = align_vectors(current_gripper_pos[:,2][:3], [0,0,1])
-  target_gripper_pos = current_gripper_pos.dot(R_t)
-  # do gripper trans lation 
-  T = np.linalg.inv(current_gripper_pos).dot(target_placement_pos)
-  placement_pos = current_gripper_pos.dot(T)
+   # show the position tf in rviz
+  tf_helper.pubTransform("place_pos_rail", ((target_object_pose.centroid.x, left_of_target_object_pose, target_object_pose.centroid.z), \
+                  (target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w)))
+
+  placement_trans = ((target_object_pose.centroid.x, left_of_target_object_pose, target_object_pose.centroid.z), \
+                  (target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w))
   # Move to placement point 
-  #placement_pos = target_placement_pos
-  for tableangle in [0.0, 0.7853975, 1.570795, 2.3561925, 3.14159, 3.9269875, 4.712385, 5.4977825]:
-    print("check table angle")
-    rotationInZ = np.identity(4)
-    rotationInZ[:3,:3] = R.from_rotvec(tableangle * np.array([0,0,1])).as_dcm()
-    placement_pos = placement_pos.dot(rotationInZ)
-    placement_trans = getTransformFromPoseMat(placement_pos)
-    tf_helper.pubTransform("trans_place_pos_rail", ((placement_trans[0][0], placement_trans[0][1] , placement_trans[0][2]), \
-                (placement_trans[1][0], placement_trans[1][1], placement_trans[1][2], placement_trans[1][3])))
-
-
-    placement_ik_result = robot.solve_ik_sollision_free_in_base(placement_trans, 30) #30
-    if placement_ik_result != None:
-      break  
-  if placement_ik_result == None:
-    return False
-
-
-  raw_input("found solution to pick")
-  # move to pre grasp pose
-  plan = robot.planto_pose(placement_trans)
-  robot.display_trajectory(plan)
-  raw_input("ready display placement")
-  robot.execute_plan(plan)
-  return True
-  
-
-  
+  pre_grasp_ik_result = robot.solve_ik_sollision_free_in_base(placement_trans, 30) #30
 
 if __name__=='__main__':
   
-  object_name = "sugar_box_simp" #"sugar_box_simp"
-  isSim = True
+  object_name = "sugar_box_simp"
+  isSim = False
 
   rospy.init_node('simtest_node')
   robot = Fetch_Robot(sim=isSim)
@@ -351,33 +339,31 @@ if __name__=='__main__':
   
 
  # add objects into planning scene
-  add_table(robot, tf_helper)
+  #add_shelfs(robot, tf_helper)
   print("Added objects")
 
   #This gets the transfrom from the object to baselink 
-  object_pose_in_base_link = tf_helper.getTransform('/base_link', '/' + object_name) # add the object into the planning scene
-  object_pose_in_base_link = tf_helper.getTransform('/base_link', '/' + "sugar_box") # add the object into the planning scene
+  #object_pose_in_base_link = tf_helper.getTransform('/base_link', '/' + object_name) # add the object into the planning scene
   #robot.addCollisionObject(object_name + "_collision", object_pose_in_base_link, objpath,size_scale = 1)
-  raw_input("chedk")
-  
-  #obj_pose_in_base_link = findMatching_PantryItem(robot, isSim)
 
-  result, placement_pose = findGrocery_Placement(robot,isSim, object_pose_in_base_link) #Object_pose_in_base_link
-  print("finding placement")
+  #set_ArmPos(robot)
+  result, matchin_obj_pose_base_link = findMatching_PantryItem(robot,isSim,"pringles_red")
+  print("Finding matching pantry Item")
   if result:
-    print("---SUCCESS---")
+    print ("---SUCCESS---")
   else:
-    print("---FAIL")
-  
-  set_ArmPos(robot)
-  result = move_to_Placement(robot, placement_pose, tf_helper)
-  print("Move to placement")
-  if result:
-    print("---SUCCESS---")
-  else:
-    print("---FAIL")
+    print("----FAIL---")
+    exit()
 
-  print("Exit")
+  findGrocery_Placement(robot,isSim, matchin_obj_pose_base_link)
+  print("Finding Placement")
+  if result:
+    print ("---SUCCESS---")
+  else:
+    print("----FAIL---")
+    exit()
+  
+  print("Done")
   exit()
 
   """ The code below allows the robot to grasp the object and move to a defult config"""
@@ -404,11 +390,11 @@ if __name__=='__main__':
   #raw_input("Ready to pick up object?")
   
   result = pickup(tf_helper, 0.15)
-  print "pick up object"
+  print("pick up object")
   if result:
-    print "---SUCCESS---"
+    print("---SUCCESS---")
   else:
-    print "---FAILURE---"
+    print("---FAILURE---")
     exit()
 
   # move to inital arm pos

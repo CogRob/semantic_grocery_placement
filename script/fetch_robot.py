@@ -143,7 +143,8 @@ class Fetch_Robot():
             
             joint_values = self.ik_solver.get_ik(seed_state, trans[0], trans[1], trans[2], rot[0], rot[1], rot[2], rot[3])
             if joint_values == None:
-                return None
+                continue
+                # return None
 
             current_robot_state = moveit_msgs.msg.RobotState()
             current_robot_state.joint_state.header.stamp = rospy.Time.now()
