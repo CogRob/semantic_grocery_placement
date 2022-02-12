@@ -288,17 +288,18 @@ def findGrocery_Placement(robot,isSim,target_object_pose):
   
   return True, placement_pose
 
-
-
 def move_to_Placement(robot, target_placement_pos, tf_helper):
   current_gripper_pos = tf_helper.getPoseMat('/base_link', '/gripper_link')
   current_gripper_trans = tf_helper.getTransform('/base_link', '/gripper_link')
   #change gripper rotation 
   R_t = align_vectors(current_gripper_pos[:,2][:3], [0,0,1])
   target_gripper_pos = current_gripper_pos.dot(R_t)
+  # R_t = np.identity(4)
+  # R_t[:,3] = current_gripper_pos[:,3]
+  # target_gripper_pos = R_t
   # do gripper trans lation 
-  T = np.linalg.inv(current_gripper_pos).dot(target_placement_pos)
-  placement_pos = current_gripper_pos.dot(T)
+  T = np.linalg.inv(target_gripper_pos).dot(target_placement_pos) #this is starting at 000
+  placement_pos = target_gripper_pos.dot(T)
   # Move to placement point 
   #placement_pos = target_placement_pos
   for tableangle in [0.0, 0.7853975, 1.570795, 2.3561925, 3.14159, 3.9269875, 4.712385, 5.4977825]:
