@@ -24,7 +24,7 @@ from semantic_grocery_placement.srv import StopOctoMap
 
 from object_cluster_planner import Grocery_cluster
 
-SHELF1 = .31
+SHELF1 = .28 #.31 #.4
 SHELF2 = 0
 
 
@@ -41,9 +41,16 @@ def add_shelfs(robot, tf_helper):
         0.0, 0.0, 0.8010766954545328 -.2, 0.5985617161159289, \
         1.5, .5, 0.05) #.7 1.5, .06  width(x), lenght(y), hight(z )
 
-    robot.addCollisionTable("shelf2", 0.7761257886886597+.13, 0.2525942027568817 -.15, 1.2541508674621582 -.55, \
+    robot.addCollisionTable("shelf2", 0.7761257886886597+.13, 0.2525942027568817 -.15, 1.2541508674621582 -.53, \
       0.0, 0.0, 0.8010766954545328 -.2, 0.5985617161159289, \
       1.5, .5, 0.05) #.7 1.5, .06  width(x), lenght(y), hight(z )
+    
+    #gripper_transform = tf_helper.getTransform('/base_link', '/gripper_link')
+    #t,r = gripper_transform
+    #robot.addCollisionTable("grasp_object", t[0]+.01,t[1]+.06, t[2]-.05,r[0],r[1],r[2],r[3], Clyinder=True, cylinderHeight= .09, cly_radius= .04) 
+    # attach object into the hand
+    
+
 
 def add_object(robot, tf_helper,object_name,object_path=None):
     """
@@ -52,13 +59,16 @@ def add_object(robot, tf_helper,object_name,object_path=None):
     this_dir, filename = os.path.split(os.path.realpath(__file__)) 
     object_path = os.path.join(os.path.split(this_dir)[0], "objects", object_name + ".stl") 
     # add the object into the planning scene 
-    current_object_transform = tf_helper.getTransform('/base_link', '/' + object_name)# get object pose
-    robot.addCollisionObject(object_name + "_collision", current_object_transform, object_path, size_scale = .15)# add it to planning scene
+    current_object_transform =  tf_helper.getTransform('/base_link', '/gripper_link')
+    robot.addCollisionObject(object_name + "_collision", current_object_transform, object_path, size_scale = .0008)# add it to planning scene
+    
+    robot.attachManipulatedObject(object_name+ "_collision")
 
 # pickup is the action to move the gripper up in the base_link frame
-def pickup(tf_helper, height):
-  """Pick up object"""
-  
+def liftup(robot, tf_helper, height):
+  """lift robot arm up"""
+  #robot.setGripperWidth(.05)
+  robot.openGripper()
   target_transform = tf_helper.getTransform('/base_link', '/gripper_link')
   target_transform[0][2] += height
 
@@ -70,6 +80,7 @@ def pickup(tf_helper, height):
     rospy.sleep(0.05)
 
   robot.switchController('arm_controller', 'my_cartesian_motion_controller')
+  robot.detachManipulatedObject(object_name + "_collision")
 
   return True, target_transform
 
@@ -218,18 +229,18 @@ def set_ArmPos(robot, defult_joints=None):
   robot.display_trajectory(plan)
   raw_input("ready to execute defult arm pos")
   robot.execute_plan(plan)
-
-  #robot.openGripper()
+  
+  ans = raw_input("Want to open gipper? Y or N")
+  if ans == 'Y' or ans == 'y':
+    robot.openGripper()
   raw_input("ready to grasp obj?")
   robot.closeGripper()
+  raw_input("ready to continue after grasp?")
 
 
-def liftRobotTorso(robot,isSim,value):
-  robot.getjointNamesNValues()
-  if isSim:
-    robot.lift_robot_torso([value])
-  else:
-    print("No controler yet for torso not in Sim")
+def liftRobotTorso(robot,value):
+  #robot.getjointNamesNValues()
+  robot.lift_robot_torso([value])
 
 def tiltHeadJoint(robot):
   pass
@@ -249,9 +260,18 @@ def matchCentroidNBoundingBox(tableresult,classifier, target_name):
   cam_K = np.array([ [527.3758609346917, 0.0, 326.6388366771264], [ 0.0, 523.6181455086474, 226.4866800158784],
          [ 0.0, 0.0, 1.0] ])
   box = None
+  if target_name == 'pringles':
+    target_name = 'pringals'
+  if target_name == 'muffin-mix':
+    target_name = 'baking-muffin-mix'
   for i in range(0, len(classifier.Labels)):
     if classifier.Labels[i] == target_name:
+      if i > len(classifier.boxes):
+        break
       box = classifier.boxes[i].box
+      print(box)
+      break
+    
 
   if not box:
     print("Failed to find matching bounding box")
@@ -268,13 +288,15 @@ def matchCentroidNBoundingBox(tableresult,classifier, target_name):
       if twoD_point[0] > box[0] and twoD_point[0] < box[2]:
         return True, obj 
 
-  print("Failed to find matching bounding box")
+  print("Failed to find centriod that matched bounding box")
   return False, -1 
 
-def findMatching_PantryItem(robot,isSim, target_object_name):
-  #liftRobotTorso(robot,isSim,SHELF2)
-  rospy.sleep(1) # might not wait long enough to lift torso.
+def findMatching_PantryItem(robot, target_object_name):
+  shelf_height = target_object_name[1]
+  liftRobotTorso(robot,shelf_height)
+  rospy.sleep(3) # might not wait long enough to lift torso.
 
+  target_object_name = target_object_name[0]
   # Stop octo map
   StopNStart_octomap()
 
@@ -301,6 +323,7 @@ def findMatching_PantryItem(robot,isSim, target_object_name):
   #Object Filter 
   rospy.wait_for_service("object_filter")
   obj_classifier = rospy.ServiceProxy('object_filter',Object_seg_result)
+  #TODO: implement looking for the next object if object not found
   while True:
     try:
       classifier_result = obj_classifier()  
@@ -309,16 +332,15 @@ def findMatching_PantryItem(robot,isSim, target_object_name):
     break
   print("Object detection finished")
 
+
   return matchCentroidNBoundingBox(tableresult ,classifier_result,target_object_name)
 
 # Know informaiton about test objects from Mesh model. 
-PringalsCan = (.13, .05)
+PringalsCan = (.11, .15)#.05)
+SpamCan =  (.1, .1)
+Mustard = (.1,.11)
+Sugar = (.1,.1)
 def findGrocery_Placement(robot,isSim,target_object_pose, object_size):
-
-
-
-  #liftRobotTorso(robot,isSim,SHELF2)
-  rospy.sleep(1) # might not wait long enough to lift torso.
 
 
   left_of_target_object_pose = target_object_pose.centroid.y + object_size[0]
@@ -327,7 +349,7 @@ def findGrocery_Placement(robot,isSim,target_object_pose, object_size):
   tf_helper.pubTransform("obj_pos_rail", ((target_object_pose.centroid.x, target_object_pose.centroid.y, target_object_pose.centroid.z), \
                   (target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w)))
 
-  placement_trans = ((target_object_pose.centroid.x, right_of_target_object_pose,up_of_target_placement_pose), \
+  placement_trans = ((target_object_pose.centroid.x, left_of_target_object_pose,up_of_target_placement_pose), \
                   (target_object_pose.orientation.x, target_object_pose.orientation.y, target_object_pose.orientation.z, target_object_pose.orientation.w))
   target_placement_pos = getMatrixFromQuaternionAndTrans(placement_trans[1],placement_trans[0])
 
@@ -373,32 +395,58 @@ def move_to_placement(robot, target_placement_pos, tf_helper):
   robot.display_trajectory(plan)
   raw_input("ready display placement")
   robot.execute_plan(plan)
+  
+  #close placemevt/ lower
+    # move back
+  post_place_trans = tf_helper.getTransform('/base_link', '/gripper_link')
+  post_place_trans[0][2] +=  -.08
+  robot.switchController('my_cartesian_motion_controller', 'arm_controller')
+
+  while not rospy.is_shutdown():
+    if robot.moveToFrame(post_place_trans, True):
+      break
+    rospy.sleep(0.05)
+
+  robot.switchController('arm_controller', 'my_cartesian_motion_controller')
   return True
 
 
 if __name__=='__main__':
   
-  object_name = "sugar_box_simp"
+  object_name = "sugar"
   isSim = False
 
-  rospy.init_node('simtest_node')
+  rospy.init_node('realtest_node')
   robot = Fetch_Robot(sim=isSim)
   tf_helper = TF_Helper()
 
   #Add object model to allow it to find grasping points. 
-  base = pandactrl.World(camp=[700,300,1400], lookatp=[0,0,0])
-  this_dir, this_filename = os.path.split(os.path.realpath(__file__))   
-  objpath = os.path.join(os.path.split(this_dir)[0], "objects", object_name + ".stl") 
-  handpkg = fetch_grippernm  #SQL grasping database interface 
-  gdb = db.GraspDB()   #SQL grasping database interface
-  planner = RegripPlanner(objpath, handpkg, gdb)
+  # base = pandactrl.World(camp=[700,300,1400], lookatp=[0,0,0])
+  # this_dir, this_filename = os.path.split(os.path.realpath(__file__))   
+  # objpath = os.path.join(os.path.split(this_dir)[0], "objects", object_name + ".stl") 
+  # handpkg = fetch_grippernm  #SQL grasping database interface 
+  # gdb = db.GraspDB()   #SQL grasping database interface
+  # planner = RegripPlanner(objpath, handpkg, gdb)
 
-  grocery_planner = Grocery_cluster()
-  grocery_planner.cluster()
+  pantry = [ "hot-sauce","cookies", "mustard","beans", "pringles", "granola-bars",  "sugar", "spam", "ketchup"]
+  grocery = [ "sugar"]
+  shelf1_items = ( [ "hot-sauce","cookies", "beans", "muffin-mix", "granola-bars", "pringles", "sugar", "spam"], SHELF1 )
+  shelf2_items = ( ["ketchup"] , SHELF2)
+  print("Clustering groceries ... be right with you")
+  #grocery_planner = Grocery_cluster(shelf1=shelf1_items, shelf2=shelf2_items,pantrys=pantry, grocerys=grocery)
+  #grocery_cluster = grocery_planner.cluster()
+  #print(grocery_cluster)
+  #print("Done with grocery cluster")
   
+
+  #placement_obj = (grocery_cluster[object_name][0][0], grocery_cluster[object_name][0][2])
+  #print(placement_obj[0])
+  placement_obj = ('granola-bars', SHELF1)
+
 
   #add objects into planning scene
   add_shelfs(robot, tf_helper)
+  add_object(robot, tf_helper,"cup")
   print("Added objects")
 
   #This gets the transfrom from the object to baselink 
@@ -406,8 +454,7 @@ if __name__=='__main__':
   #robot.addCollisionObject(object_name + "_collision", object_pose_in_base_link, objpath,size_scale = 1)
 
   set_ArmPos(robot)
-
-  result, matchin_obj_pose_base_link = findMatching_PantryItem(robot,isSim,'pringles_red')
+  result, matchin_obj_pose_base_link = findMatching_PantryItem(robot,placement_obj)
   print("Finding matching pantry Item")
   if result:
     print ("---SUCCESS---")
@@ -424,11 +471,15 @@ if __name__=='__main__':
     exit()
   
   result = move_to_placement(robot, target_placement_pos, tf_helper)
+  print("Moving to placement")
   if result:
     print ("---SUCCESS---")
   else:
     print("----FAIL---")
     exit()
+  
+  result = liftup(robot,tf_helper, .1)
+  set_ArmPos(robot)
   
   exit()
   """ The code below allows the robot to grasp the object and move to a defult config"""

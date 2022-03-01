@@ -104,7 +104,7 @@ class Fetch_Robot():
         self.state_valid_service = rospy.ServiceProxy('check_state_validity', GetStateValidity)
 
     
-    def lift_robot_torso(self, joint_value=[0.3]):
+    def lift_robot_torso(self, joint_value=[0.3]): #0 - .4
         joint_names = ['torso_lift_joint']
         client = actionlib.SimpleActionClient("/torso_controller/follow_joint_trajectory", FollowJointTrajectoryAction)
 
@@ -350,10 +350,10 @@ class Fetch_Robot():
         except rospy.ServiceException as e:
             print("Service called: %s" % e)
 
-    def addCollisionTable(self, objectname, x, y, z, rx, ry, rz, rw, width, depth, height):
+    def addCollisionTable(self, objectname, x, y, z, rx, ry, rz, rw, width=None, depth=None, height=None,Clyinder=False, cylinderHeight=0.001, cly_radius=0.05):
         
         table_pose = PoseStamped()
-        cylinderHeight = 0.001
+        #cylinderHeight = 0.001
         table_pose.header.frame_id = self.robot.get_planning_frame()
         table_pose.pose.position.x = x
         table_pose.pose.position.y = y
@@ -364,14 +364,19 @@ class Fetch_Robot():
         table_pose.pose.orientation.z = rz
         table_pose.pose.orientation.w = rw
         
-        # self.scene.add_cylinder(objectname, table_pose, height=cylinderHeight, radius=0.05)
-        self.scene.add_box(objectname, table_pose, size=(width,depth,height))
+        if Clyinder:
+            r = cly_radius
+            self.scene.add_cylinder(objectname, table_pose, height=cylinderHeight, radius=r)
+        else:
+            self.scene.add_box(objectname, table_pose, size=(width,depth,height))
+
         start = rospy.get_time()
         second = rospy.get_time()
         while (second - start) < self.timeout and not rospy.is_shutdown():
             if objectname in self.scene.get_known_object_names():
                 break
             second = rospy.get_time()
+
 
     def attachTable(self, tablename):
         touch_links = []
