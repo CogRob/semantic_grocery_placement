@@ -1,41 +1,29 @@
 import sys
 import math
+from tabnanny import check
 sys.path.append('../data')
 
 from pantry_database import misc 
-from scipy.special import softmax
+from sklearn.preprocessing import StandardScaler
 from scipy import spatial
 import numpy as np
 from gensim.models import Word2Vec
 import gensim.downloader
 
-FOOD_GROUP_WEIGHT =  1.5
-CONTAINER_WEIGHT = 1.2
-STABLE_WEIGHT = 1
-PURPOSE_WEIGHT = 1.3
-WORD2VECT_WEIGHT = 1.5
+FOOD_GROUP_WEIGHT =  .703
+CONTAINER_WEIGHT = .710
+STABLE_WEIGHT = .898
+PURPOSE_WEIGHT = .908
+WORD2VECT_WEIGHT = .7801
 
-def food_group_score(pantry_FG, grocery_FG):
-    fg_Pvector =  np.array(pantry_FG.values()).astype(np.float)
-    fg_Gvector =  np.array(grocery_FG.values()).astype(np.float)
 
-    #fg_score = sum(fg_Pvector * fg_Gvector) 
-    fg_score = 1- spatial.distance.cosine(fg_Pvector, fg_Gvector)
-    # fg_score +=  .5*( (pantry_FG["Fruits"] * grocery_FG["Vegetables"]) + (grocery_FG["Fruits"] * pantry_FG["Vegetables"]))
-    # fg_score += .5* ( (grocery_FG["Seeds_Nuts"] * pantry_FG["Butters"]) + ( pantry_FG["Seeds_Nuts"]  *  grocery_FG["Butters"]) )
-    # fg_score += .5* ( (pantry_FG["Roots_Tubers_Plantains"] * grocery_FG["Vegetables"]) + (grocery_FG["Roots_Tubers_Plantains"] * pantry_FG["Vegetables"]))
-    return fg_score
 
-def continer_group_score(pantry_CG, grocery_CG):
-    cg_Pvector = np.array(pantry_CG.values())
-    cg_Gvector = np.array(grocery_CG.values())
+def catigory_score(pantryGroup, groceryGroup):
+    Pvector = np.array([x for x in pantryGroup.values()])
+    Gvector = np.array([x for x in groceryGroup.values()])
 
-    #cg_score = sum(cg_Pvector * cg_Gvector)
-    cg_score = 1- spatial.distance.cosine(cg_Pvector, cg_Gvector) 
-    # cg_score +=  .3*( (pantry_CG["Can"] * grocery_CG["Cylinder"]) + (grocery_CG["Can"] * pantry_CG["Cylinder"]) )
-    # cg_score +=  .3*( (pantry_CG["Jar"] * grocery_CG["Cylinder"]) + (grocery_CG["Jar"] * pantry_CG["Cylinder"]) )
-    # cg_score +=  .3*( (pantry_CG["Can"] * grocery_CG["Jar"]) + (grocery_CG["Can"] * pantry_CG["Jar"]) )
-    return cg_score
+    score = 1- spatial.distance.cosine(Pvector, Gvector) 
+    return score
 
 def word2vec_score(glove_wiki_vec,pantry,grocery):
     complex_words = [ "gummy-vitamins", "baby-formula", "condensed-milk", "alfredo-sauce","olive-oil", "granola-bars","pancake-mix", "peanut-butter", "grape-jam","bread-crumbs", "hot-sauce", "tomato-soup", "muffin-mix"]
@@ -81,11 +69,12 @@ def cluster(pantry_items, grocery_items):
         score_list = []
         for pantry_obj in pantry_items:
 
-            fg_score = FOOD_GROUP_WEIGHT * food_group_score(misc[pantry_obj]["Food_Groups"], misc[grocery]["Food_Groups"])
-            continer_score = CONTAINER_WEIGHT * continer_group_score(misc[pantry_obj]["Continer"], misc[grocery]["Continer"])
+            fg_score = FOOD_GROUP_WEIGHT *  catigory_score(misc[pantry_obj]["Food_Groups"], misc[grocery]["Food_Groups"])
+            continer_score = CONTAINER_WEIGHT *  catigory_score(misc[pantry_obj]["Continer"], misc[grocery]["Continer"])
 
-            stability_score = STABLE_WEIGHT * (sum(np.array(misc[pantry_obj]["Stability"].values()) * np.array(misc[grocery]["Stability"].values()) ))
-            purpose_score = PURPOSE_WEIGHT * (sum(np.array(misc[pantry_obj]["Purpose"].values()) * np.array(misc[grocery]["Purpose"].values()) ))
+            stability_score = STABLE_WEIGHT * catigory_score(misc[pantry_obj]["Stability"], misc[grocery]["Stability"])
+            purpose_score = PURPOSE_WEIGHT * sum(np.array([x for x in misc[pantry_obj]["Purpose"].values()]) *
+                         np.array([x for x in misc[grocery]["Purpose"].values()]))
 
             wdVec_score = WORD2VECT_WEIGHT * word2vec_score(glove_wiki_vec ,pantry_obj,grocery)
 
@@ -107,82 +96,61 @@ def cluster_covariance_matrix():
     glove_wiki_vec = gensim.downloader.load('glove-wiki-gigaword-300')
     variables_len = 5
     num_objs = len(misc)
-    X = np.zeros((num_objs*num_objs, variables_len))
-    for c in range(0,len(X[0]-1)):
-        for r in range(0,len(X)):
-            var = 0.0
-            current_obj = misc.keys()[r]
-            #print(misc[current_obj]["Food_Groups"].values())
-            for obj in misc.keys():
-                if c == 0:
-                    var += food_group_score(misc[current_obj]["Food_Groups"], misc[obj]["Food_Groups"])
-                if c == 1:
-                    var += continer_group_score(misc[current_obj]["Continer"], misc[obj]["Continer"])
-                if c == 2:
-                    var +=  sum(np.array(misc[current_obj]["Stability"].values()) * np.array(misc[obj]["Stability"].values()) )
-                if c == 3:
-                    var += sum(np.array(misc[current_obj]["Purpose"].values()) * np.array(misc[obj]["Purpose"].values()) )
-
-                #var = var / num_objs
-                X[r][c] = var 
-
+    print(num_objs)
+    misc_keys = [x for x in misc.keys()]
+    # 946 is the number of combinations for our 43 grocery items pairs, none repeting
+    X = np.zeros((946, variables_len))
+   #X = np.zeros((num_objs*num_objs, variables_len))
+    i = 0
+    checked_set = set()
+    cnt = 0     
     complex_words = [ "gummy-vitamins", "baby-formula", "condensed-milk", "alfredo-sauce","olive-oil", "granola-bars","pancake-mix", "peanut-butter", "grape-jam","bread-crumbs", "hot-sauce", "tomato-soup", "muffin-mix"]
-    for r in range(0,len(X)):
-        #print(misc.keys()[r])
-        wd_score = 0 
-        for obj in misc.keys():
-            current_obj = misc.keys()[r]
-            if current_obj not in complex_words and obj not in complex_words:
-                wd_score += glove_wiki_vec.similarity( current_obj, obj)
-            else:
-                if current_obj in complex_words and obj in complex_words:
-                    current_obj = current_obj.split("-")
-                    obj = obj.split("-")
-                    current_obj = glove_wiki_vec[current_obj[0]] +  glove_wiki_vec[current_obj[1]]
-                    obj = glove_wiki_vec[obj[0]] +  glove_wiki_vec[obj[1]]
-                    current_obj = np.array(current_obj)
-                    obj = np.array(obj)
-                    wd_score += current_obj.dot(obj)/np.linalg.norm(obj)/np.linalg.norm(current_obj)
-                elif current_obj in complex_words:
-                    current_obj = current_obj.split("-")
-                    current_obj = glove_wiki_vec[current_obj[0]] +  glove_wiki_vec[current_obj[1]]
-                    obj = glove_wiki_vec[obj]
-                    current_obj = np.array(current_obj)
-                    obj = np.array(obj)
-                    wd_score += current_obj.dot(obj)/np.linalg.norm(obj)/np.linalg.norm(current_obj)
-                elif obj in complex_words:
-                    obj = obj.split("-")
-                    obj = glove_wiki_vec[obj[0]] +  glove_wiki_vec[obj[1]]
-                    current_obj = glove_wiki_vec[current_obj]
-                    current_obj = np.array(current_obj)
-                    obj = np.array(obj)
-                    wd_score += current_obj.dot(obj)/np.linalg.norm(obj)/np.linalg.norm(current_obj)
-            #wd_score = wd_score/num_objs
-            X[r][variables_len-1] = wd_score
+    for _ in range(i, num_objs):
+        j = 0
+        for _ in range(j,num_objs):
+            fg, cg, s, p = 0,0,0,0
+            wd_score = 0 
+            current_obj = misc_keys[i]
+            obj = misc_keys[j]
+            if (current_obj, obj) not in checked_set and (obj, current_obj) not in checked_set:
+                checked_set.add((current_obj, obj))
+                fg = catigory_score(misc[current_obj]["Food_Groups"], misc[obj]["Food_Groups"])
+                cg = catigory_score(misc[current_obj]["Continer"], misc[obj]["Continer"])
+                s = sum(np.array([x for x in misc[current_obj]["Stability"].values()]) *
+                         np.array([x for x in misc[obj]["Stability"].values()]))
+                p = sum(np.array([x for x in misc[current_obj]["Purpose"].values()]) *
+                         np.array([x for x in misc[obj]["Purpose"].values()]))
+    #           s = catigory_score(misc[current_obj]["Stability"], misc[obj]["Stability"])
+    #           p = catigory_score(misc[current_obj]["Purpose"], misc[obj]["Purpose"])
+                # wd2Vec score 
+                wd_score = word2vec_score(glove_wiki_vec, current_obj, obj)
+        
+                X[cnt][0] = fg 
+                X[cnt][1] = cg 
+                X[cnt][2] = s 
+                X[cnt][3] = p 
+                X[cnt][4] = wd_score
+                cnt += 1
+            j +=1
+        i +=1
+    print(cnt)
+           
 
-    # X_mean = [ sum(X[:,0])/num_objs, sum(X[:,1])/num_objs , sum(X[:,2])/num_objs,
-    #             sum(X[:,3])/num_objs, sum(X[:,4])/num_objs]
-    # X_mean = np.array(X_mean)
     print("printing X")
     print(X)
+    print(len(X))
 
-    # print(X_mean)
     C = np.cov(X, rowvar=False)
-    # cov_sum = np.array([0.,0.,0.,0.])
-    # for i in range(0, num_objs):
-    #     V = X[i,:] - X_mean
-    #     V_t = np.transpose(V)
-    #     cov_sum += V.dot(V_t) 
-    # print(cov_sum/(num_objs-1))
-    print("Pringint C")
+    print("Printing C")
     print(C)
+    return X, C
 
-pantry = [ "hot-sauce","cookies", "ketchup", "muffin-mix", "granola-bars", "beans", "pringles"]
-grocerys = [ "pringles", "spam", "sugar", "mustard"]
+#pantry = [ "hot-sauce","cookies", "ketchup", "muffin-mix", "granola-bars", "beans", "pringles"]
+#grocerys = [ "pringles", "spam", "sugar", "mustard"]
 #grocerys= ["tomato-soup", "hot-sauce", "pancake-mix", "peanut-butter"]
 #cluster_list = cluster(pantry, grocerys)
 #print(cluster_list)
-cluster_covariance_matrix()
+#cluster_covariance_matrix()
 
 
 class Grocery_cluster:

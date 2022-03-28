@@ -24,7 +24,7 @@ from semantic_grocery_placement.srv import StopOctoMap
 
 from object_cluster_planner import Grocery_cluster
 
-SHELF1 = .28 #.31 #.4
+SHELF1 = .28 #.31 .4
 SHELF2 = 0
 
 
@@ -260,6 +260,7 @@ def matchCentroidNBoundingBox(tableresult,classifier, target_name):
   cam_K = np.array([ [527.3758609346917, 0.0, 326.6388366771264], [ 0.0, 523.6181455086474, 226.4866800158784],
          [ 0.0, 0.0, 1.0] ])
   box = None
+  target_name = target_name.split('_')[0]
   if target_name == 'pringles':
     target_name = 'pringals'
   if target_name == 'muffin-mix':
@@ -277,6 +278,7 @@ def matchCentroidNBoundingBox(tableresult,classifier, target_name):
     print("Failed to find matching bounding box")
     return False, -1
 
+ 
   target_transfom = tf_helper.getPoseMat( '/head_camera_depth_optical_frame', '/base_link')
   for obj in tableresult.segmented_objects.objects:
     obj_trans = np.array( [obj.centroid.x, obj.centroid.y, obj.centroid.z, 1])
@@ -332,11 +334,10 @@ def findMatching_PantryItem(robot, target_object_name):
     break
   print("Object detection finished")
 
-
   return matchCentroidNBoundingBox(tableresult ,classifier_result,target_object_name)
 
 # Know informaiton about test objects from Mesh model. 
-PringalsCan = (.11, .15)#.05)
+PringalsCan = (.11, .11)#.05)
 SpamCan =  (.1, .1)
 Mustard = (.1,.11)
 Sugar = (.1,.1)
@@ -430,18 +431,18 @@ if __name__=='__main__':
 
   pantry = [ "hot-sauce","cookies", "mustard","beans", "pringles", "granola-bars",  "sugar", "spam", "ketchup"]
   grocery = [ "sugar"]
-  shelf1_items = ( [ "hot-sauce","cookies", "beans", "muffin-mix", "granola-bars", "pringles", "sugar", "spam"], SHELF1 )
-  shelf2_items = ( ["ketchup"] , SHELF2)
+  shelf1_items = ( [ "mustard_b","cookies", "beans", "muffin-mix", "granola-bars", "pringles", "sugar", "spam"], SHELF1 )
+  shelf2_items = ( ["hot-sauce"] , SHELF2)
   print("Clustering groceries ... be right with you")
-  #grocery_planner = Grocery_cluster(shelf1=shelf1_items, shelf2=shelf2_items,pantrys=pantry, grocerys=grocery)
-  #grocery_cluster = grocery_planner.cluster()
-  #print(grocery_cluster)
-  #print("Done with grocery cluster")
+  grocery_planner = Grocery_cluster(shelf1=shelf1_items, shelf2=shelf2_items,pantrys=pantry, grocerys=grocery)
+  grocery_cluster = grocery_planner.cluster()
+  print(grocery_cluster)
+  print("Done with grocery cluster")
   
 
-  #placement_obj = (grocery_cluster[object_name][0][0], grocery_cluster[object_name][0][2])
-  #print(placement_obj[0])
-  placement_obj = ('granola-bars', SHELF1)
+  placement_obj = (grocery_cluster[object_name][0][0], grocery_cluster[object_name][0][2])
+  print(placement_obj[0])
+  #placement_obj = ('mustard_b', SHELF1)
 
 
   #add objects into planning scene
@@ -462,6 +463,8 @@ if __name__=='__main__':
     print("----FAIL---")
     exit()
 
+
+
   result,target_placement_pos = findGrocery_Placement(robot,isSim, matchin_obj_pose_base_link, PringalsCan)
   print("Finding Placement")
   if result:
@@ -470,6 +473,9 @@ if __name__=='__main__':
     print("----FAIL---")
     exit()
   
+  
+
+
   result = move_to_placement(robot, target_placement_pos, tf_helper)
   print("Moving to placement")
   if result:
@@ -478,11 +484,18 @@ if __name__=='__main__':
     print("----FAIL---")
     exit()
   
+  robot.detachManipulatedObject(object_name + "_collision")
   result = liftup(robot,tf_helper, .1)
   set_ArmPos(robot)
   
   exit()
-  """ The code below allows the robot to grasp the object and move to a defult config"""
+
+
+  """
+
+   The code below allows the robot to grasp the object from a table and move to a defult config
+   
+   """
   # extract the list of init grasps
   result, init_grasps = getInitGrasps(gdb, object_name=object_name)
   print("get init grasps")
